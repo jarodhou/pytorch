@@ -21,12 +21,12 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
-    DIM,
     _check_dynamic_shapes,
     _combine_args,
     _process_dynamic_shapes,
     _transform_shapes_for_default_dynamic,
     _tree_map_with_path,
+    DIM,
 )
 from torch.export.graph_signature import CustomObjArgument
 from torch.fx.experimental.symbolic_shapes import (

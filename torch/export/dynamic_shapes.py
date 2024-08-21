@@ -42,6 +42,7 @@ class DIM(Enum):
     """
     Enum for automatic/static dynamic shapes.
     """
+    
     STATIC = auto()
     AUTO = auto()
 

@@ -1953,6 +1953,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_mismatched_dynamic_shapes(self):
         from torch.export.dynamic_shapes import DIM
+
         AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         class M(torch.nn.Module):
@@ -2493,6 +2494,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         # for this use case, mark_dynamic() and AUTO should have same effect.
         # check that same symbol gets allocated to both dims without raising constraint violation.
         from torch.export.dynamic_shapes import DIM
+
         AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         class Foo(torch.nn.Module):
@@ -2501,13 +2503,9 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 torch._check(x.shape[0] <= 64)
                 return x + 2, y + 2
 
-        inputs = (
-            torch.randn(4, 4), torch.randn(4, 4)
-        )
+        inputs = (torch.randn(4, 4), torch.randn(4, 4))
         ep_auto = torch.export.export(
-            Foo(),
-            inputs,
-            dynamic_shapes={"x": (AUTO, None), "y": (AUTO, None)}
+            Foo(), inputs, dynamic_shapes={"x": (AUTO, None), "y": (AUTO, None)}
         )
         torch._dynamo.mark_dynamic(inputs[0], 0)
         torch._dynamo.mark_dynamic(inputs[1], 0)
@@ -6864,6 +6862,7 @@ def forward(self, x, y):
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
         # with runtime asserts. Check that we specialize to static values when the program says so.
         from torch.export.dynamic_shapes import DIM
+
         AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         # case 1: direct equality between symbols
@@ -6930,6 +6929,7 @@ def forward(self, x, y):
 
     def test_automatic_dynamic_shapes_constant_relation(self):
         from torch.export.dynamic_shapes import DIM
+
         AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         # case 2: related by constant: s0 + 4 = s1
@@ -6974,6 +6974,7 @@ def forward(self, x, y):
 
     def test_automatic_dynamic_shapes_linear_relation(self):
         from torch.export.dynamic_shapes import DIM
+
         AUTO, STATIC = DIM.AUTO, DIM.STATIC
 
         # case 3: linear relation
