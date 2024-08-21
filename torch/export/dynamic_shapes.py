@@ -807,7 +807,8 @@ def _check_dynamic_shapes(
     from torch._dynamo.exc import UserError, UserErrorType
     from torch._export.non_strict_utils import _flatten_dynamic_shapes
 
-    if dynamic_shapes is None or len(dynamic_shapes) == 0:
+    if dynamic_shapes is True or dynamic_shapes is None or len(dynamic_shapes) == 0:
+        # no check needed
         return
     if isinstance(dynamic_shapes, (tuple, list)):
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
@@ -853,7 +854,7 @@ def _check_dynamic_shapes(
                         f"(expected None, an int, a Dim, DIM.AUTO, or DIM.STATIC, but got {dim} instead)",
                         case_name="dynamic_shapes_validation",
                     )
-        elif shape is not None:
+        elif shape not in [None, True]:
             raise UserError(
                 UserErrorType.INVALID_INPUT,
                 f"Unexpected input tensor shape {shape} specified at `dynamic_shapes{keystr(path)}` "
@@ -1148,7 +1149,7 @@ def _process_dynamic_shapes(
 
     def update_symbols(path, tensor, shape):
         def _create_static_dim(tensor, i, value):
-            return _StaticDim(str(value), (int,), {"value": value})
+            return _StaticDim(f"{value}_{id(tensor)}_{i}", (int,), {"value": value})
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
