@@ -3,6 +3,7 @@ import dataclasses
 import inspect
 import sys
 from collections import defaultdict
+from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -29,11 +30,20 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Constraint",
+    "DIM",
     "Dim",
     "dims",
     "dynamic_dim",
     "refine_dynamic_shapes_from_suggested_fixes",
 ]
+
+
+class DIM(Enum):
+    """
+    Enum for automatic/static dynamic shapes.
+    """
+    STATIC = auto()
+    AUTO = auto()
 
 
 class _Dim(type):
@@ -533,7 +543,11 @@ def _process_equalities(
     fields of `EqualityConstraint`) based on a given input `constraint`.
     """
 
-    source, *other_sources = get_sources(constraint.t_id, constraint.dim)
+    sources = get_sources(constraint.t_id, constraint.dim)
+    if not sources:  # empty sources due to unused shapes
+        return
+
+    source, *other_sources = sources
     # When t.size()[dim] maps to src0, src1, ..., srcN, we add
     # constraints that make src0 "equal" to src1, ..., srcN.
     source_pairs.extend((source, other_source) for other_source in other_sources)
@@ -793,8 +807,7 @@ def _check_dynamic_shapes(
     from torch._dynamo.exc import UserError, UserErrorType
     from torch._export.non_strict_utils import _flatten_dynamic_shapes
 
-    if dynamic_shapes is True or dynamic_shapes is None or len(dynamic_shapes) == 0:
-        # no check needed
+    if dynamic_shapes is None or len(dynamic_shapes) == 0:
         return
     if isinstance(dynamic_shapes, (tuple, list)):
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]
@@ -820,32 +833,32 @@ def _check_dynamic_shapes(
             for i, dim in shape.items():
                 if isinstance(dim, _Dim):
                     check_same_bounds(dim)
-                elif not isinstance(dim, int) and dim not in [None, True]:
+                elif not (isinstance(dim, (int, DIM)) or dim is None):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
-                        f"(expected None, True, an int, or a Dim, but got {dim} instead)",
+                        f"(expected None, an int, a Dim, DIM.AUTO, or DIM.STATIC, but got {dim} instead)",
                         case_name="dynamic_shapes_validation",
                     )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
                 if isinstance(dim, _Dim):
                     check_same_bounds(dim)
-                elif not isinstance(dim, int) and dim not in [None, True]:
+                elif not (isinstance(dim, (int, DIM)) or dim is None):
                     raise UserError(
                         UserErrorType.INVALID_INPUT,
                         f"Unexpected dimension #{i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
-                        f"(expected None, True, an int, or a Dim, but got {dim} instead)",
+                        f"(expected None, an int, a Dim, DIM.AUTO, or DIM.STATIC, but got {dim} instead)",
                         case_name="dynamic_shapes_validation",
                     )
-        elif shape not in [None, True]:
+        elif shape is not None:
             raise UserError(
                 UserErrorType.INVALID_INPUT,
                 f"Unexpected input tensor shape {shape} specified at `dynamic_shapes{keystr(path)}` "
                 f"(expected either a list/tuple of dimensions, or a dict mapping indices to dimensions,"
-                f" where each dimension is None, True, an int, or a Dim)",
+                f" where each dimension is None, an int, a Dim, DIM.AUTO, or DIM.STATIC)",
                 case_name="dynamic_shapes_validation",
             )
 
@@ -896,14 +909,14 @@ def _check_dynamic_shapes(
     flat_dynamic_shapes = _flatten_dynamic_shapes(combined_args, dynamic_shapes)
     flatter_dynamic_shapes, _ = tree_flatten(flat_dynamic_shapes)
     if any(isinstance(s, _Dim) for s in flatter_dynamic_shapes) and any(
-        s is True for s in flatter_dynamic_shapes
+        s == DIM.AUTO for s in flatter_dynamic_shapes
     ):
         raise UserError(
             UserErrorType.INVALID_INPUT,
-            "Specifying both `True` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
+            "Specifying both `DIM.AUTO` and `Dim` or `DerivedDim` in `dynamic_shapes` is not well supported at the moment, "
             "and can easily lead to constraint violation errors or obscure errors in torch.export. Dim/DerivedDims "
-            "expect all equal or related dimensions to be specified, and does not yet compose well with `True`. "
-            "We suggest using `True` mixed with `None` for auto-dynamic + static shapes, plus torch._check(dim >= min), "
+            "expect all equal or related dimensions to be specified, and does not yet compose well with `DIM.AUTO`. "
+            "We suggest using `DIM.AUTO` mixed with `None` for auto-dynamic + static shapes, plus torch._check(dim >= min), "
             "torch._check(dim <= max) calls in your program to specify min/max ranges, or `Dim`/`DerivedDim` mixed with `None` "
             "if you want to assert on the exact specification of your program's dynamic shapes behavior.",
             case_name="dynamic_shapes_validation",
@@ -925,8 +938,8 @@ def _transform_shapes_for_default_dynamic(
       for all dims governed by this symbol (i.e. relations, equality, linear relations, etc.)
 
     For export.export(), historically dynamism for unspecified dims has been undesirable, so the semantics are:
-    - True: dynamic, allocated a symbol
-    - None/unspecified: static
+    - DIM.AUTO: dynamic, allocated a symbol
+    - None/unspecified/DIM.STATIC: static
     - Dim/DerivedDims: also a strict assertion
 
     To allow both APIs to follow the same process for producing constraints, this function converts dynamic_shapes
@@ -936,8 +949,8 @@ def _transform_shapes_for_default_dynamic(
     An example conversion might look like, for a 3-d input tensor:
 
         input spec: {
-            0: True,
-            1: None,
+            0: DIM.AUTO,
+            1: None,  # or DIM.STATIC
             2: Dim("dx"),
         }
         output spec: {
@@ -967,10 +980,7 @@ def _transform_shapes_for_default_dynamic(
             children, context
         )  # unflatten into original type, or list if not built-in type
 
-    if dynamic_shapes is True:
-        # dynamic by default, return None so no constraints are produced
-        return None
-    elif (
+    if (
         dynamic_shapes is None or len(dynamic_shapes) == 0
     ):  # create pytree structure of static dim
         dynamic_shapes = _tree_map_helper(combined_args, None)
@@ -986,7 +996,7 @@ def _transform_shapes_for_default_dynamic(
             out = {}
             for i, val in enumerate(tensor.shape):
                 dim = shape.get(i, None)
-                if _marked_dynamic(tensor, i) or dim is True:
+                if _marked_dynamic(tensor, i) or dim == DIM.AUTO:
                     # don't have to specify anything if dynamic
                     # None also works, since assume_static_by_default=False
                     continue
@@ -998,24 +1008,22 @@ def _transform_shapes_for_default_dynamic(
                     out[i] = dim
                 else:
                     # make explicitly static
-                    assert dim is None
+                    assert dim is None or dim == DIM.STATIC
                     out[i] = val
         elif isinstance(shape, (tuple, list)):
             out = []
             for i, val in enumerate(tensor.shape):
                 dim = shape[i]
-                if _marked_dynamic(tensor, i) or dim is True:
+                if _marked_dynamic(tensor, i) or dim == DIM.AUTO:
                     out.append(None)
                 elif isinstance(dim, _Dim):
                     out.append(dim)
                 elif isinstance(dim, int):
                     out.append(dim)
                 else:
-                    assert dim is None
+                    assert dim is None or dim == DIM.STATIC
                     out.append(val)
-            out = type(shape)(out)
-        elif shape is True:
-            out = None
+            out = type(shape)(out)  # type: ignore[assignment]
         else:
             assert shape is None
             if isinstance(tensor, torch.Tensor):
@@ -1140,7 +1148,7 @@ def _process_dynamic_shapes(
 
     def update_symbols(path, tensor, shape):
         def _create_static_dim(tensor, i, value):
-            return _StaticDim(f"{value}_{id(tensor)}_{i}", (int,), {"value": value})
+            return _StaticDim(str(value), (int,), {"value": value})
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
@@ -1200,7 +1208,7 @@ def _get_dim_name_mapping(
         dynamic_shapes,
         is_leaf=lambda x: isinstance(x, _Dim),
     )[0]:
-        if dim is None or isinstance(dim, int):
+        if isinstance(dim, (int, DIM)) or dim is None:
             continue
         name_to_dim[dim.__name__] = dim
         if isinstance(dim, _DerivedDim):

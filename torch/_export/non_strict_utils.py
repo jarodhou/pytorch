@@ -21,6 +21,7 @@ from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
+    DIM,
     _check_dynamic_shapes,
     _combine_args,
     _process_dynamic_shapes,
@@ -347,12 +348,8 @@ def make_constraints(
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                dim = (
-                    None
-                    if (shape_spec is None or shape_spec is True)
-                    else shape_spec[i]
-                )
-                if dim is True or dim is None:
+                dim = shape_spec[i] if shape_spec else None
+                if dim is None or isinstance(dim, DIM):
                     range_constraints[d.node.expr] = shape_env.var_to_range[
                         d.node._expr
                     ]
