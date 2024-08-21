@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import dataclasses
 from enum import auto, Enum
-from typing import Collection, Dict, List, Mapping, Optional, Set, Union
+from typing import Collection, Dict, List, Mapping, Optional, Set, TYPE_CHECKING, Union
 
-import torch
-from torch._functorch._aot_autograd.schemas import GraphSignature
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.utils import _pytree as pytree
+
+if TYPE_CHECKING:
+    import torch
+    from torch._functorch._aot_autograd.schemas import GraphSignature
 
 __all__ = [
     "ConstantArgument",
@@ -452,7 +453,7 @@ def _immutable_dict(items):
 
 
 def _make_argument_spec(i, node, token_names) -> ArgumentSpec:
-    from torch import SymInt, ScriptObject
+    from torch import ScriptObject, SymInt
     from torch._library.fake_class_registry import FakeScriptObject
     from torch._subclasses.fake_tensor import FakeTensor
 
@@ -486,10 +487,12 @@ def _make_argument_spec(i, node, token_names) -> ArgumentSpec:
 
 
 def _convert_to_export_graph_signature(
-    graph_signature: GraphSignature,
-    gm: torch.fx.GraphModule,
+    graph_signature: "GraphSignature",
+    gm: "torch.fx.GraphModule",
     non_persistent_buffers: Set[str],
-) -> ExportGraphSignature:
+) -> "ExportGraphSignature":
+    from torch.utils import _pytree as pytree
+
     is_joint = graph_signature.backward_signature is not None
 
     # unpack objects
