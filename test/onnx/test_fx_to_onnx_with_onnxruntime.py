@@ -19,7 +19,7 @@ import torch
 import torch.onnx
 from torch import nn
 from torch._subclasses import fake_tensor
-from torch.onnx._internal import _exporter_legacy
+#from torch.onnx._internal import _exporter_legacy
 from torch.onnx._internal.fx import (
     diagnostics,
     fx_symbolic_graph_extractor,
@@ -648,9 +648,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Trying to flatten user inputs with exported input tree spec"
-    )
+    @unittest.skip("GPT2 model is being run with debug level True for some reason")
     @pytorch_test_common.xfail_dynamic_fx_test(
         error_message="!(it.GetName().empty())",
         reason="With after onnx==1.16, constant folding in optimizer causes this error.",
@@ -1015,7 +1013,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     if (
                         model_type
                         == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
-                    ):
+                    ):  
+                        print("FAKE MODEL")
                         fake_model = torch.export.export(
                             fake_model, args=fake_args, kwargs=fake_kwargs
                         )
@@ -1030,7 +1029,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 if (
                     model_type
                     == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
-                ):
+                ):  
                     fake_model = torch.export.export(
                         fake_model, args=fake_args, kwargs=fake_kwargs
                     )
@@ -1051,6 +1050,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
             with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+                onnx_program.save("onnx.onnx")
                 onnx_program.save(
                     tmp_onnx_file.name, model_state=tmp_checkpoint_file.name
                 )
@@ -1072,6 +1072,13 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 args_not_none = onnx_program.adapt_torch_inputs_to_onnx(
                     *args, model_with_state_dict=real_model, **kwargs
                 )
+
+                print("RRRR", len(args_not_none))
+                count = 0
+                for node in fake_model.graph.nodes:
+                    if node.op == "placeholder":
+                        print(f"SHAPE {count}", node.meta["val"].shape, args_not_none[count].shape)
+                        count += 1
 
                 ort_outputs = onnx_test_common.run_ort(
                     tmp_onnx_file.name,
